@@ -1,7 +1,6 @@
 import { NavLink } from 'react-router-dom';
-import { Route, ListChecks, Users, FileSpreadsheet, Settings, LogOut, Sun, Moon, Waypoints } from 'lucide-react';
+import { Route, ListChecks, Users, FileSpreadsheet, Settings, Sun, Moon, Waypoints } from 'lucide-react';
 import clsx from 'clsx';
-import { signOut } from '../../lib/supabaseClient';
 
 const ITEMS = [
   { to: '/planifier', label: 'Planifier', icon: Route },
@@ -31,13 +30,6 @@ export default function NavRail({ theme, onToggleTheme }) {
         >
           {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
           <Tooltip>{theme === 'dark' ? 'Mode clair' : 'Mode sombre'}</Tooltip>
-        </button>
-        <button
-          onClick={() => signOut()}
-          className="group relative w-11 h-11 rounded-xl flex items-center justify-center text-ink-faint hover:text-danger hover:bg-danger/10 transition-colors"
-        >
-          <LogOut size={18} />
-          <Tooltip>Se déconnecter</Tooltip>
         </button>
       </div>
     </nav>

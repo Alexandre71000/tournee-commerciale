@@ -2,7 +2,6 @@ import { createContext, useCallback, useContext, useEffect, useState } from 'rea
 import { fetchClients, upsertClient as upsertClientApi, upsertClientsBatch as upsertClientsBatchApi, deleteClient as deleteClientApi } from '../lib/clients';
 import { fetchTours, saveTour as saveTourApi, deleteTour as deleteTourApi, fetchSettings, saveSettings as saveSettingsApi } from '../lib/tours';
 import { CONFIG } from '../lib/config';
-import { useAuth } from '../hooks/useAuth';
 
 const AppDataContext = createContext(null);
 
@@ -19,7 +18,6 @@ function defaultSettings() {
 }
 
 export function AppDataProvider({ children }) {
-  const { user } = useAuth();
   const [clients, setClients] = useState([]);
   const [tours, setTours] = useState([]);
   const [settings, setSettings] = useState(defaultSettings());
@@ -38,15 +36,7 @@ export function AppDataProvider({ children }) {
   }, []);
 
   useEffect(() => {
-    if (!user) {
-      setClients([]);
-      setTours([]);
-      setSettings(defaultSettings());
-      setLoading(false);
-      return;
-    }
     let cancelled = false;
-    setLoading(true);
     (async () => {
       const [clientsData, settingsData] = await Promise.all([fetchClients(), fetchSettings()]);
       if (cancelled) return;
@@ -57,7 +47,7 @@ export function AppDataProvider({ children }) {
     return () => {
       cancelled = true;
     };
-  }, [user]);
+  }, []);
 
   const upsertClient = useCallback(async (client) => {
     const saved = await upsertClientApi(client);
