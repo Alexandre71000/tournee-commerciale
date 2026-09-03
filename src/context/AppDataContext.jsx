@@ -13,6 +13,7 @@ function defaultSettings() {
     default_visit_duration_min: CONFIG.DEFAULT_VISIT_DURATION_MIN,
     day_start: CONFIG.DEFAULT_DAY_START,
     max_day_hours: CONFIG.DEFAULT_MAX_DAY_HOURS,
+    lunch_break_min: CONFIG.DEFAULT_LUNCH_BREAK_MIN,
     suggestion_radius_km: CONFIG.SUGGESTION_RADIUS_KM,
   };
 }

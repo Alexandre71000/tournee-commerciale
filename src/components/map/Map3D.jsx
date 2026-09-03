@@ -72,6 +72,9 @@ export default function Map3D({ home, days = [], activeDayFilter = 'all' }) {
     overlaysRef.current = [];
 
     const focusPoints = [];
+    const hotelKey = (p) => (p ? `${p.lat.toFixed(4)},${p.lng.toFixed(4)}` : null);
+    const homeKey = home ? hotelKey(home) : null;
+    const renderedHotels = new Set();
 
     if (home && home.lat != null) {
       try {
@@ -94,10 +97,12 @@ export default function Map3D({ home, days = [], activeDayFilter = 'all' }) {
       const visible = activeDayFilter === 'all' || activeDayFilter === String(i);
       if (!visible || !day.stops?.length) return;
       const color = dayColor(i);
+      const origin = day.origin || home;
+      const destination = day.destination || home;
 
       try {
-        if (home) {
-          const path = [home, ...day.stops, home].map((p) => ({ lat: p.lat, lng: p.lng, altitude: 20 }));
+        const path = buildDayPath(day, origin, destination);
+        if (path.length >= 2) {
           const polyline = new Polyline3DElement({
             path,
             strokeColor: color,
@@ -110,6 +115,42 @@ export default function Map3D({ home, days = [], activeDayFilter = 'all' }) {
         }
       } catch {
         /* ignore si non supporté */
+      }
+
+      // Étiquettes de durée à mi-chemin de chaque trajet.
+      try {
+        legMidpoints(day).forEach(({ position, minutes }) => {
+          const labelMarker = new Marker3DElement({
+            position: { lat: position.lat, lng: position.lng, altitude: 12 },
+            altitudeMode: 'RELATIVE_TO_GROUND',
+          });
+          labelMarker.label = `${minutes} min`;
+          const smallPin = new PinElement({ background: color, scale: 0.45, glyphColor: color, borderColor: '#ffffff' });
+          labelMarker.append(smallPin);
+          map.append(labelMarker);
+          overlaysRef.current.push(labelMarker);
+        });
+      } catch {
+        /* étiquette non supportée par cette version de l'API — les durées restent visibles dans le panneau latéral */
+      }
+
+      // Marqueur hôtel si la journée se termine ailleurs qu'au domicile.
+      if (destination && hotelKey(destination) !== homeKey && !renderedHotels.has(hotelKey(destination))) {
+        renderedHotels.add(hotelKey(destination));
+        try {
+          const hotelMarker = new Marker3DElement({
+            position: { lat: destination.lat, lng: destination.lng, altitude: 35 },
+            altitudeMode: 'RELATIVE_TO_GROUND',
+            extruded: true,
+          });
+          const hotelPin = new PinElement({ background: '#1F2937', borderColor: '#FBBF24', glyphColor: '#FBBF24', glyphText: 'H' });
+          hotelMarker.append(hotelPin);
+          map.append(hotelMarker);
+          overlaysRef.current.push(hotelMarker);
+          focusPoints.push(destination);
+        } catch {
+          /* ignore */
+        }
       }
 
       day.stops.forEach((stop, idx) => {
@@ -178,6 +219,33 @@ export default function Map3D({ home, days = [], activeDayFilter = 'all' }) {
       )}
     </div>
   );
+}
+
+// Construit le tracé complet d'une journée à partir des tracés routiers détaillés de chaque trajet
+// (origine → arrêt 1 → ... → destination). Repli sur une ligne directe si le détail est indisponible
+// (ex: tournée relue depuis l'historique sans tracé sauvegardé).
+function buildDayPath(day, origin, destination) {
+  const legs = day.legs || [];
+  const hasDetailedPaths = legs.length > 0 && legs.every((l) => l.path && l.path.length > 1);
+  if (hasDetailedPaths) {
+    const pts = [];
+    legs.forEach((leg) => leg.path.forEach((p) => pts.push({ lat: p.lat, lng: p.lng, altitude: 20 })));
+    return pts;
+  }
+  return [origin, ...day.stops, destination].filter(Boolean).map((p) => ({ lat: p.lat, lng: p.lng, altitude: 20 }));
+}
+
+// Point médian de chaque trajet (pour y accrocher une étiquette de durée) avec la durée en minutes.
+function legMidpoints(day) {
+  const legs = day.legs || [];
+  return legs
+    .map((leg) => {
+      const minutes = Math.round((leg.durationS || 0) / 60);
+      if (!minutes || !leg.path || !leg.path.length) return null;
+      const position = leg.path[Math.floor(leg.path.length / 2)];
+      return { position, minutes };
+    })
+    .filter(Boolean);
 }
 
 function spreadRangeMeters(points, center) {

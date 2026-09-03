@@ -1,28 +1,48 @@
 import { haversineKm, splitIntoDayGroups, computeOptimizedRoute, buildSchedule } from './geo';
 
+const TIGHT_MARGIN_MIN = 30; // journée jugée "serrée" si elle se termine dans cette marge avant la limite
+
 // Construit un plan de tournée complet.
 // params: {
 //   home: {lat,lng},
 //   dates: ['2026-09-08', ...],
 //   mustVisitClients: [client...] (avec lat/lng déjà géocodés),
 //   candidateClients: [client...] (pool du secteur pour les suggestions, hors mustVisit),
-//   dayStart: 'HH:MM', visitDurationMin: number, suggestionRadiusKm: number, maxDayHours: number,
+//   dayStart: 'HH:MM', visitDurationMin, lunchBreakMin, suggestionRadiusKm, maxDayHours,
+//   overnightHotels: [{lat,lng,address} | null, ...] — hôtel utilisé pour la nuit après le jour i
+//     (donc point de départ du jour i+1). Optionnel, absent = on repart toujours de `home`.
 // }
 export async function buildTourPlan(params) {
-  const { home, dates, mustVisitClients, candidateClients, dayStart, visitDurationMin, suggestionRadiusKm, maxDayHours } = params;
+  const {
+    home,
+    dates,
+    mustVisitClients,
+    candidateClients,
+    dayStart,
+    visitDurationMin,
+    lunchBreakMin,
+    suggestionRadiusKm,
+    maxDayHours,
+    overnightHotels = [],
+  } = params;
 
   const numDays = dates.length;
   const groups = splitIntoDayGroups(mustVisitClients, numDays);
+  const budgetMin = maxDayHours * 60;
 
   const days = [];
   for (let i = 0; i < numDays; i++) {
     const dayClients = groups[i] || [];
+    const origin = i === 0 ? home : overnightHotels[i - 1] || home;
+    const destination = i === numDays - 1 ? home : overnightHotels[i] || home;
+
     let route = null;
     let schedule = null;
     if (dayClients.length) {
-      route = await computeOptimizedRoute(home, dayClients);
+      const departureDate = new Date(`${dates[i]}T${dayStart}:00`);
+      route = await computeOptimizedRoute(origin, destination, dayClients, departureDate);
       if (route) {
-        schedule = buildSchedule(route.orderedStops, route.legs, dayStart, visitDurationMin);
+        schedule = buildSchedule(route.orderedStops, route.legs, dayStart, visitDurationMin, lunchBreakMin);
       }
     }
 
@@ -30,28 +50,35 @@ export async function buildTourPlan(params) {
       ? rankSuggestions(candidateClients, route ? route.orderedStops : dayClients, suggestionRadiusKm)
       : [];
 
-    const overloaded = schedule ? schedule.endOfDayMin - toMinutes(dayStart) > maxDayHours * 60 : false;
+    let status = 'ok';
+    let overloadMin = 0;
+    if (schedule) {
+      const daySpanMin = schedule.endOfDayMin - schedule.dayStartMin;
+      overloadMin = daySpanMin - budgetMin;
+      if (overloadMin > 0) status = 'infeasible';
+      else if (overloadMin > -TIGHT_MARGIN_MIN) status = 'tight';
+    }
 
     days.push({
       date: dates[i],
+      origin,
+      destination,
       stops: route ? route.orderedStops : dayClients,
       legs: route ? route.legs : [],
       totalDistanceM: route ? route.totalDistanceM : 0,
       totalDurationS: route ? route.totalDurationS : 0,
       schedule,
       suggestions,
-      overloaded,
+      status,
+      overloadMin,
+      // rétro-compatibilité : anciens consommateurs qui lisent `overloaded`
+      overloaded: status === 'infeasible',
     });
   }
 
   dedupeSuggestionsAcrossDays(days);
 
   return { home, dates, days };
-}
-
-function toMinutes(hhmm) {
-  const [h, m] = hhmm.split(':').map(Number);
-  return h * 60 + m;
 }
 
 function rankSuggestions(candidateClients, dayStops, radiusKm) {

@@ -3,6 +3,7 @@
 @tailwind utilities;
 
 :root {
+  color-scheme: light;
   --surface: 247 248 250;
   --surface-2: 255 255 255;
   --surface-3: 241 243 246;
@@ -19,6 +20,7 @@
 }
 
 :root.dark {
+  color-scheme: dark;
   --surface: 8 10 14;
   --surface-2: 15 18 24;
   --surface-3: 22 26 34;

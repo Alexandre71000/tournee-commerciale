@@ -67,9 +67,14 @@ export default function SettingsPage() {
             <Input type="number" min={1} step={0.5} value={form.max_day_hours || ''} onChange={set('max_day_hours', Number)} />
           </Field>
         </div>
-        <Field label="Rayon de suggestion de visites annexes (km)">
-          <Input type="number" min={1} step={1} value={form.suggestion_radius_km || ''} onChange={set('suggestion_radius_km', Number)} />
-        </Field>
+        <div className="grid grid-cols-2 gap-3.5">
+          <Field label="Pause déjeuner (min)" hint="Placée automatiquement entre 12h et 13h">
+            <Input type="number" min={0} step={5} value={form.lunch_break_min ?? ''} onChange={set('lunch_break_min', Number)} />
+          </Field>
+          <Field label="Rayon de suggestion de visites annexes (km)">
+            <Input type="number" min={1} step={1} value={form.suggestion_radius_km || ''} onChange={set('suggestion_radius_km', Number)} />
+          </Field>
+        </div>
       </GlassPanel>
 
       <Button variant="primary" onClick={handleSave} disabled={saving}>

@@ -144,18 +144,40 @@ function getDirectionsService() {
   return directionsServicePromise;
 }
 
-// Calcule l'itinéraire optimisé (aller-retour depuis `home`) pour une liste de clients d'une journée.
-export async function computeOptimizedRoute(home, dayClients) {
+let geometryLibraryPromise;
+function getGeometryLibrary() {
+  if (!geometryLibraryPromise) geometryLibraryPromise = importLibrary('geometry');
+  return geometryLibraryPromise;
+}
+
+function decodeLegPath(leg, encoding) {
+  const points = [];
+  for (const step of leg.steps || []) {
+    if (!step.polyline || !step.polyline.points) continue;
+    const decoded = encoding.decodePath(step.polyline.points);
+    for (const p of decoded) points.push({ lat: p.lat(), lng: p.lng() });
+  }
+  return points;
+}
+
+// Calcule l'itinéraire optimisé d'une journée entre `origin` et `destination` (peuvent différer
+// si la tournée part/arrive d'un hôtel), en tenant compte du trafic prévisionnel à `departureDate`.
+export async function computeOptimizedRoute(origin, destination, dayClients, departureDate) {
   if (!dayClients.length) return null;
   const service = await getDirectionsService();
   const { TravelMode } = await importLibrary('routes');
+  const { encoding } = await getGeometryLibrary();
 
   const request = {
-    origin: { lat: home.lat, lng: home.lng },
-    destination: { lat: home.lat, lng: home.lng },
+    origin: { lat: origin.lat, lng: origin.lng },
+    destination: { lat: destination.lat, lng: destination.lng },
     waypoints: dayClients.map((c) => ({ location: { lat: c.lat, lng: c.lng }, stopover: true })),
     optimizeWaypoints: true,
     travelMode: TravelMode.DRIVING,
+    drivingOptions: {
+      departureTime: departureDate instanceof Date ? departureDate : new Date(),
+      trafficModel: 'bestguess',
+    },
   };
 
   return new Promise((resolve) => {
@@ -170,7 +192,8 @@ export async function computeOptimizedRoute(home, dayClients) {
       const orderedStops = order.map((idx) => dayClients[idx]);
       const legs = route.legs.map((l) => ({
         distanceM: l.distance ? l.distance.value : 0,
-        durationS: l.duration ? l.duration.value : 0,
+        durationS: (l.duration_in_traffic || l.duration)?.value || 0,
+        path: decodeLegPath(l, encoding),
       }));
       const totalDistanceM = legs.reduce((s, l) => s + l.distanceM, 0);
       const totalDurationS = legs.reduce((s, l) => s + l.durationS, 0);
@@ -179,25 +202,75 @@ export async function computeOptimizedRoute(home, dayClients) {
   });
 }
 
-// Construit le planning horaire d'une journée à partir de l'itinéraire optimisé.
-export function buildSchedule(orderedStops, legs, dayStartHHMM, visitDurationMin) {
+// ---------------------------------------------------------------------------
+// Planning horaire : créneaux ronds (heure pile / demie), marge de sécurité au
+// départ, pause déjeuner glissée automatiquement entre midi et 13h.
+// ---------------------------------------------------------------------------
+export const SLOT_MINUTES = 30;
+const LUNCH_WINDOW_START_MIN = 12 * 60;
+const LUNCH_WINDOW_END_MIN = 13 * 60;
+
+function roundUpToSlot(min, slot) {
+  return Math.ceil(min / slot) * slot;
+}
+function roundDownToSlot(min, slot) {
+  return Math.floor(min / slot) * slot;
+}
+
+// Construit le planning horaire d'une journée à partir de l'itinéraire optimisé :
+// chaque visite démarre sur un créneau rond (30 min), le départ recommandé (créneau
+// précédent) laisse une marge de sécurité, et une pause déjeuner de `lunchBreakMin`
+// est insérée à un horaire aléatoire entre 12h et 13h si la journée s'étend jusque-là.
+// Retourne une liste d'événements chronologiques (visites + pause déjeuner éventuelle).
+export function buildSchedule(orderedStops, legs, dayStartHHMM, visitDurationMin, lunchBreakMin = 60) {
   const [h, m] = dayStartHHMM.split(':').map(Number);
-  let cursorMin = h * 60 + m;
-  const schedule = [];
+  const dayStartMin = h * 60 + m;
+  let clock = dayStartMin;
+
+  const lunchTarget = LUNCH_WINDOW_START_MIN + Math.random() * (LUNCH_WINDOW_END_MIN - LUNCH_WINDOW_START_MIN);
+  let lunchTaken = !(lunchBreakMin > 0);
+
+  const events = [];
+  const stops = [];
   for (let i = 0; i < orderedStops.length; i++) {
     const travelMin = Math.round((legs[i]?.durationS || 0) / 60);
-    cursorMin += travelMin;
-    const arrival = cursorMin;
-    cursorMin += visitDurationMin;
-    schedule.push({
+    let rawArrival = clock + travelMin;
+
+    if (!lunchTaken && rawArrival >= lunchTarget) {
+      const lunchStart = roundUpToSlot(Math.max(clock, lunchTarget), 15);
+      const lunchEnd = lunchStart + lunchBreakMin;
+      events.push({ type: 'lunch', startMin: lunchStart, endMin: lunchEnd });
+      clock = lunchEnd;
+      lunchTaken = true;
+      rawArrival = clock + travelMin;
+    }
+
+    const visitStart = roundUpToSlot(rawArrival, SLOT_MINUTES);
+    const recommendedDepartureMin = roundDownToSlot(visitStart - travelMin, SLOT_MINUTES);
+    const visitEnd = visitStart + visitDurationMin;
+
+    const stopEvent = {
+      type: 'stop',
       client: orderedStops[i],
       travelMinFromPrevious: travelMin,
-      arrivalMin: arrival,
-      departureMin: cursorMin,
-    });
+      recommendedDepartureMin,
+      arrivalMin: visitStart,
+      departureMin: visitEnd,
+      path: legs[i]?.path || null,
+    };
+    events.push(stopEvent);
+    stops.push(stopEvent);
+
+    clock = visitEnd;
   }
+
   const returnTravelMin = Math.round((legs[orderedStops.length]?.durationS || 0) / 60);
-  return { stops: schedule, returnTravelMin, endOfDayMin: cursorMin + returnTravelMin };
+  const returnPath = legs[orderedStops.length]?.path || null;
+  const endOfDayMin = clock + returnTravelMin;
+
+  const firstDepartureEarlierMin = stops.length ? Math.max(0, dayStartMin - stops[0].recommendedDepartureMin) : 0;
+
+  return { events, stops, returnTravelMin, returnPath, endOfDayMin, dayStartMin, firstDepartureEarlierMin };
 }
 
 export function minutesToHHMM(totalMin) {

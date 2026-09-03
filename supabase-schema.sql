@@ -42,6 +42,7 @@ create table user_settings (
   default_visit_duration_min integer default 45,
   day_start text default '08:30',
   max_day_hours numeric default 9,
+  lunch_break_min integer default 60,
   suggestion_radius_km numeric default 5
 );
 
