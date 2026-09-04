@@ -204,11 +204,14 @@ export async function computeOptimizedRoute(origin, destination, dayClients, dep
 
 // ---------------------------------------------------------------------------
 // Planning horaire : créneaux ronds (heure pile / demie), marge de sécurité au
-// départ, pause déjeuner glissée automatiquement entre midi et 13h.
+// départ, pause déjeuner glissée automatiquement entre midi et 13h. Aucune
+// visite ne peut démarrer entre 12h et 14h (bloc repas + battement), même si
+// la pause elle-même est plus courte que ces deux heures.
 // ---------------------------------------------------------------------------
 export const SLOT_MINUTES = 30;
 const LUNCH_WINDOW_START_MIN = 12 * 60;
 const LUNCH_WINDOW_END_MIN = 13 * 60;
+const NO_VISIT_BEFORE_MIN = 14 * 60;
 
 function roundUpToSlot(min, slot) {
   return Math.ceil(min / slot) * slot;
@@ -239,21 +242,33 @@ export function buildSchedule(orderedStops, legs, dayStartHHMM, visitDurationMin
     const travelMin = Math.round((legs[i]?.durationS || 0) / 60);
     let rawArrival = clock + travelMin;
 
-    if (!lunchTaken && rawArrival >= lunchTarget) {
-      const lunchStart = roundUpToSlot(Math.max(clock, lunchTarget), 15);
-      const lunchEnd = lunchStart + lunchBreakMin;
-      events.push({ type: 'lunch', startMin: lunchStart, endMin: lunchEnd });
-      clock = lunchEnd;
-      lunchTaken = true;
-      rawArrival = clock + travelMin;
-    }
-
     // Le tout premier arrêt du jour (départ du domicile ou de l'hôtel) n'est pas contraint par une
     // visite précédente : on peut viser le créneau le plus proche (avant ou après) en recommandant
     // de partir un peu plus tôt, plutôt que d'attendre systématiquement le créneau suivant.
     // Les arrêts suivants sont contraints par l'heure réelle de fin de la visite précédente : on ne
     // peut qu'arrondir au créneau suivant (impossible d'arriver avant d'être physiquement parti).
-    const visitStart = i === 0 ? roundNearestSlot(rawArrival, SLOT_MINUTES) : roundUpToSlot(rawArrival, SLOT_MINUTES);
+    let visitStart = i === 0 ? roundNearestSlot(rawArrival, SLOT_MINUTES) : roundUpToSlot(rawArrival, SLOT_MINUTES);
+
+    // Si cette visite démarrerait à midi ou après, la pause déjeuner passe avant (à l'horaire
+    // aléatoire visé, ou immédiatement si on est déjà dans la plage) : on ne peut plus la caser
+    // après. La visite est ensuite recalculée à partir de la fin de pause (créneau suivant, plus de
+    // marge de flexibilité même pour le 1er arrêt puisqu'on est maintenant contraint par la pause).
+    if (!lunchTaken && visitStart >= LUNCH_WINDOW_START_MIN) {
+      const lunchStart = roundUpToSlot(Math.max(clock, Math.min(lunchTarget, visitStart)), 15);
+      const lunchEnd = lunchStart + lunchBreakMin;
+      events.push({ type: 'lunch', startMin: lunchStart, endMin: lunchEnd });
+      clock = lunchEnd;
+      lunchTaken = true;
+      rawArrival = clock + travelMin;
+      visitStart = roundUpToSlot(rawArrival, SLOT_MINUTES);
+    }
+
+    // Garde-fou final : aucune visite ne démarre entre 12h et 14h, même après la pause (ex. pause
+    // courte se terminant à 13h10 — la journée reprend à 14h, pas juste après la pause).
+    if (visitStart >= LUNCH_WINDOW_START_MIN && visitStart < NO_VISIT_BEFORE_MIN) {
+      visitStart = NO_VISIT_BEFORE_MIN;
+    }
+
     const recommendedDepartureMin = roundDownToSlot(visitStart - travelMin, SLOT_MINUTES);
     const visitEnd = visitStart + visitDurationMin;
 
