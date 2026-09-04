@@ -216,6 +216,9 @@ function roundUpToSlot(min, slot) {
 function roundDownToSlot(min, slot) {
   return Math.floor(min / slot) * slot;
 }
+function roundNearestSlot(min, slot) {
+  return Math.round(min / slot) * slot;
+}
 
 // Construit le planning horaire d'une journée à partir de l'itinéraire optimisé :
 // chaque visite démarre sur un créneau rond (30 min), le départ recommandé (créneau
@@ -245,7 +248,12 @@ export function buildSchedule(orderedStops, legs, dayStartHHMM, visitDurationMin
       rawArrival = clock + travelMin;
     }
 
-    const visitStart = roundUpToSlot(rawArrival, SLOT_MINUTES);
+    // Le tout premier arrêt du jour (départ du domicile ou de l'hôtel) n'est pas contraint par une
+    // visite précédente : on peut viser le créneau le plus proche (avant ou après) en recommandant
+    // de partir un peu plus tôt, plutôt que d'attendre systématiquement le créneau suivant.
+    // Les arrêts suivants sont contraints par l'heure réelle de fin de la visite précédente : on ne
+    // peut qu'arrondir au créneau suivant (impossible d'arriver avant d'être physiquement parti).
+    const visitStart = i === 0 ? roundNearestSlot(rawArrival, SLOT_MINUTES) : roundUpToSlot(rawArrival, SLOT_MINUTES);
     const recommendedDepartureMin = roundDownToSlot(visitStart - travelMin, SLOT_MINUTES);
     const visitEnd = visitStart + visitDurationMin;
 
