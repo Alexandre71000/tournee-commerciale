@@ -13,7 +13,9 @@ function ensureScriptLoaded() {
     }
     window.__tourneeGmapsReady = () => resolve();
     const script = document.createElement('script');
-    script.src = `https://maps.googleapis.com/maps/api/js?loading=async&key=${CONFIG.GOOGLE_MAPS_API_KEY}&libraries=maps3d,marker,geocoding,routes&callback=__tourneeGmapsReady`;
+    // "maps3d" (tuiles 3D photoréalistes, lourdes) n'est volontairement pas chargée ici : elle n'est
+    // importée à la demande (voir importLibrary) que si l'utilisateur bascule sur la vue 3D.
+    script.src = `https://maps.googleapis.com/maps/api/js?loading=async&key=${CONFIG.GOOGLE_MAPS_API_KEY}&libraries=maps,marker,geocoding,routes&callback=__tourneeGmapsReady`;
     script.async = true;
     script.onerror = () => reject(new Error('Impossible de charger Google Maps — vérifie la clé API dans src/lib/config.js'));
     document.head.appendChild(script);

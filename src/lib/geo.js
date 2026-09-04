@@ -228,7 +228,7 @@ function roundNearestSlot(min, slot) {
 // précédent) laisse une marge de sécurité, et une pause déjeuner de `lunchBreakMin`
 // est insérée à un horaire aléatoire entre 12h et 13h si la journée s'étend jusque-là.
 // Retourne une liste d'événements chronologiques (visites + pause déjeuner éventuelle).
-export function buildSchedule(orderedStops, legs, dayStartHHMM, visitDurationMin, lunchBreakMin = 60) {
+export function buildSchedule(orderedStops, legs, dayStartHHMM, visitDurationMin, lunchBreakMin = 60, durationOverrides = null) {
   const [h, m] = dayStartHHMM.split(':').map(Number);
   const dayStartMin = h * 60 + m;
   let clock = dayStartMin;
@@ -270,7 +270,8 @@ export function buildSchedule(orderedStops, legs, dayStartHHMM, visitDurationMin
     }
 
     const recommendedDepartureMin = roundDownToSlot(visitStart - travelMin, SLOT_MINUTES);
-    const visitEnd = visitStart + visitDurationMin;
+    const stopDurationMin = durationOverrides?.[orderedStops[i].id] ?? visitDurationMin;
+    const visitEnd = visitStart + stopDurationMin;
 
     const stopEvent = {
       type: 'stop',
@@ -279,6 +280,7 @@ export function buildSchedule(orderedStops, legs, dayStartHHMM, visitDurationMin
       recommendedDepartureMin,
       arrivalMin: visitStart,
       departureMin: visitEnd,
+      durationMin: stopDurationMin,
       path: legs[i]?.path || null,
     };
     events.push(stopEvent);
@@ -300,4 +302,14 @@ export function minutesToHHMM(totalMin) {
   const h = Math.floor(totalMin / 60) % 24;
   const m = Math.round(totalMin % 60);
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+// Formatte une durée en minutes de façon lisible : "45 min" sous l'heure, "1 h 24" au-delà.
+export function formatDuration(totalMin) {
+  const total = Math.round(totalMin);
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  if (h <= 0) return `${m} min`;
+  if (m === 0) return `${h} h`;
+  return `${h} h ${String(m).padStart(2, '0')}`;
 }

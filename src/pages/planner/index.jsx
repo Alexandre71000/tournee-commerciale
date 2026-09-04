@@ -18,6 +18,7 @@ export default function PlannerPage() {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [overnightHotels, setOvernightHotels] = useState({}); // { [dayIndex]: {lat,lng,address} }
   const [dayEndOverrides, setDayEndOverrides] = useState({}); // { [dayIndex]: 'HH:MM' }
+  const [durationOverrides, setDurationOverrides] = useState({}); // { [clientId]: minutes }
   const [plan, setPlan] = useState(null);
   const [activeDayFilter, setActiveDayFilter] = useState('all');
   const [generating, setGenerating] = useState(false);
@@ -41,7 +42,7 @@ export default function PlannerPage() {
         totalDistanceM: d.totalDistanceM || 0,
         totalDurationS: d.totalDurationS || 0,
         schedule: buildSchedule(d.stops || [], d.legs || [], settings.day_start, settings.default_visit_duration_min, settings.lunch_break_min),
-        suggestions: [],
+        suggestions: { onRoute: [], nearby: [] },
         dayEnd: d.dayEnd || settings.day_end,
         status: 'ok',
         overloadMin: 0,
@@ -66,7 +67,7 @@ export default function PlannerPage() {
   const removeDate = useCallback((d) => setDates((prev) => prev.filter((x) => x !== d)), []);
 
   const generate = useCallback(
-    async (extraSelectedIds, hotelsOverride, dayEndOverride) => {
+    async (extraSelectedIds, hotelsOverride, dayEndOverride, durationOverride) => {
       if (!settings.home_lat) return toast('Configure ton adresse de départ dans Réglages', 'error');
       if (!dates.length) return toast('Ajoute au moins un jour de déplacement', 'error');
       const ids = extraSelectedIds || selectedIds;
@@ -80,6 +81,7 @@ export default function PlannerPage() {
         const hotelsArray = dates.slice(0, -1).map((_, i) => hotelsMap[i] || null);
         const dayEndMap = dayEndOverride || dayEndOverrides;
         const dayEndArray = dates.map((_, i) => dayEndMap[i] || settings.day_end);
+        const durationMap = durationOverride || durationOverrides;
 
         const result = await buildTourPlan({
           home: { lat: settings.home_lat, lng: settings.home_lng },
@@ -92,6 +94,7 @@ export default function PlannerPage() {
           suggestionRadiusKm: settings.suggestion_radius_km,
           dayEndTimes: dayEndArray,
           overnightHotels: hotelsArray,
+          durationOverrides: durationMap,
         });
         setPlan(result);
         setActiveDayFilter('all');
@@ -102,7 +105,7 @@ export default function PlannerPage() {
         setGenerating(false);
       }
     },
-    [clients, dates, sector, selectedIds, overnightHotels, dayEndOverrides, settings, toast]
+    [clients, dates, sector, selectedIds, overnightHotels, dayEndOverrides, durationOverrides, settings, toast]
   );
 
   const addSuggestion = useCallback(
@@ -133,6 +136,17 @@ export default function PlannerPage() {
       setDayEndOverrides((prev) => {
         const next = { ...prev, [dayIndex]: hhmm };
         generate(null, null, next);
+        return next;
+      });
+    },
+    [generate]
+  );
+
+  const setDurationForStop = useCallback(
+    (clientId, minutes) => {
+      setDurationOverrides((prev) => {
+        const next = { ...prev, [clientId]: minutes };
+        generate(null, null, null, next);
         return next;
       });
     },
@@ -204,6 +218,7 @@ export default function PlannerPage() {
           overnightHotels={overnightHotels}
           onSetHotel={setHotelForDay}
           onSetDayEnd={setDayEndForDay}
+          onSetDuration={setDurationForStop}
         />
       </div>
     </div>

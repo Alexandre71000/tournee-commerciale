@@ -1,6 +1,9 @@
 import { haversineKm, splitIntoDayGroups, computeOptimizedRoute, buildSchedule } from './geo';
 
 const TIGHT_MARGIN_MIN = 30; // journée jugée "serrée" si elle se termine dans cette marge avant la limite
+const ON_ROUTE_DETOUR_MAX_MIN = 8; // détour estimé en dessous duquel un client est jugé "sur la route"
+const FALLBACK_KM_PER_MIN = 0.75; // ~45 km/h, utilisé si la journée n'a pas encore de trajet calculé
+const MAX_SUGGESTIONS_PER_LIST = 5;
 
 // Construit un plan de tournée complet.
 // params: {
@@ -13,6 +16,8 @@ const TIGHT_MARGIN_MIN = 30; // journée jugée "serrée" si elle se termine dan
 //     modifiable jour par jour pour un impératif ponctuel.
 //   overnightHotels: [{lat,lng,address} | null, ...] — hôtel utilisé pour la nuit après le jour i
 //     (donc point de départ du jour i+1). Optionnel, absent = on repart toujours de `home`.
+//   durationOverrides: { [clientId]: minutes } — durée de visite spécifique pour certains clients,
+//     remplace `visitDurationMin` pour ceux-là uniquement.
 // }
 export async function buildTourPlan(params) {
   const {
@@ -26,6 +31,7 @@ export async function buildTourPlan(params) {
     suggestionRadiusKm,
     dayEndTimes = [],
     overnightHotels = [],
+    durationOverrides = null,
   } = params;
 
   const numDays = dates.length;
@@ -43,13 +49,13 @@ export async function buildTourPlan(params) {
       const departureDate = new Date(`${dates[i]}T${dayStart}:00`);
       route = await computeOptimizedRoute(origin, destination, dayClients, departureDate);
       if (route) {
-        schedule = buildSchedule(route.orderedStops, route.legs, dayStart, visitDurationMin, lunchBreakMin);
+        schedule = buildSchedule(route.orderedStops, route.legs, dayStart, visitDurationMin, lunchBreakMin, durationOverrides);
       }
     }
 
     const suggestions = dayClients.length
-      ? rankSuggestions(candidateClients, route ? route.orderedStops : dayClients, suggestionRadiusKm)
-      : [];
+      ? estimateSuggestions(candidateClients, origin, route ? route.orderedStops : dayClients, destination, route, suggestionRadiusKm)
+      : { onRoute: [], nearby: [] };
 
     const dayEnd = dayEndTimes[i] || '18:00';
     const dayEndMin = toMinutes(dayEnd);
@@ -90,32 +96,55 @@ function toMinutes(hhmm) {
   return h * 60 + m;
 }
 
-function rankSuggestions(candidateClients, dayStops, radiusKm) {
-  const ranked = [];
+// Estime, pour chaque client candidat à proximité, le détour (en minutes) que représenterait son
+// insertion dans la tournée du jour à l'endroit le plus avantageux (entre deux arrêts consécutifs,
+// avant le premier ou après le dernier). Le détour est calibré sur la vitesse moyenne réelle de la
+// journée (distance/durée du trajet calculé), avec un repli si le trajet n'a pas encore été calculé.
+// Résultat : deux listes triées par détour croissant — "sur la route" (détour quasi nul) et
+// "à proximité" (détour non négligeable, affiché pour que le choix soit éclairé).
+function estimateSuggestions(candidateClients, origin, dayStops, destination, route, radiusKm) {
+  const sequence = [origin, ...dayStops, destination].filter(Boolean);
+  const kmPerMin =
+    route && route.totalDurationS > 0 ? route.totalDistanceM / 1000 / (route.totalDurationS / 60) : FALLBACK_KM_PER_MIN;
+
+  const scored = [];
   for (const c of candidateClients) {
-    let minDist = Infinity;
-    for (const stop of dayStops) {
-      const d = haversineKm(c, stop);
-      if (d < minDist) minDist = d;
+    let bestExtraKm = Infinity;
+    let nearestKm = Infinity;
+    for (let i = 0; i < sequence.length - 1; i++) {
+      const a = sequence[i];
+      const b = sequence[i + 1];
+      const extra = haversineKm(a, c) + haversineKm(c, b) - haversineKm(a, b);
+      if (extra < bestExtraKm) bestExtraKm = extra;
+      nearestKm = Math.min(nearestKm, haversineKm(c, a), haversineKm(c, b));
     }
-    if (minDist <= radiusKm) ranked.push({ client: c, distanceKm: minDist });
+    if (nearestKm > radiusKm) continue;
+    scored.push({ client: c, distanceKm: nearestKm, detourMin: Math.max(0, bestExtraKm) / kmPerMin });
   }
-  ranked.sort((a, b) => a.distanceKm - b.distanceKm);
-  return ranked.slice(0, 8);
+  scored.sort((a, b) => a.detourMin - b.detourMin);
+
+  return {
+    onRoute: scored.filter((s) => s.detourMin <= ON_ROUTE_DETOUR_MAX_MIN),
+    nearby: scored.filter((s) => s.detourMin > ON_ROUTE_DETOUR_MAX_MIN),
+  };
 }
 
 function dedupeSuggestionsAcrossDays(days) {
   const bestDayForClient = new Map();
   days.forEach((day, dayIdx) => {
-    day.suggestions.forEach((s) => {
+    [...day.suggestions.onRoute, ...day.suggestions.nearby].forEach((s) => {
       const id = s.client.id;
       const current = bestDayForClient.get(id);
-      if (!current || s.distanceKm < current.distanceKm) {
-        bestDayForClient.set(id, { dayIdx, distanceKm: s.distanceKm });
+      if (!current || s.detourMin < current.detourMin) {
+        bestDayForClient.set(id, { dayIdx, detourMin: s.detourMin });
       }
     });
   });
   days.forEach((day, dayIdx) => {
-    day.suggestions = day.suggestions.filter((s) => bestDayForClient.get(s.client.id).dayIdx === dayIdx).slice(0, 5);
+    const keep = (s) => bestDayForClient.get(s.client.id).dayIdx === dayIdx;
+    day.suggestions = {
+      onRoute: day.suggestions.onRoute.filter(keep).slice(0, MAX_SUGGESTIONS_PER_LIST),
+      nearby: day.suggestions.nearby.filter(keep).slice(0, MAX_SUGGESTIONS_PER_LIST),
+    };
   });
 }

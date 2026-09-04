@@ -1,0 +1,35 @@
+// Styles Google Maps personnalisés (vue 2D) — palette sobre alignée sur l'identité de l'app,
+// avec les points d'intérêt commerciaux masqués pour ne pas polluer la lecture d'une tournée.
+export const LIGHT_MAP_STYLE = [
+  { elementType: 'geometry', stylers: [{ color: '#f4f5f7' }] },
+  { elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#6b7280' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#f4f5f7' }] },
+  { featureType: 'administrative', elementType: 'geometry.stroke', stylers: [{ color: '#d7dae0' }] },
+  { featureType: 'administrative.land_parcel', stylers: [{ visibility: 'off' }] },
+  { featureType: 'poi', stylers: [{ visibility: 'off' }] },
+  { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#e5eee7' }] },
+  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#ffffff' }] },
+  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#e2e5ea' }] },
+  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#eef0f3' }] },
+  { featureType: 'road.arterial', elementType: 'labels.text.fill', stylers: [{ color: '#9aa0ab' }] },
+  { featureType: 'transit', stylers: [{ visibility: 'off' }] },
+  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#dbeafe' }] },
+];
+
+export const DARK_MAP_STYLE = [
+  { elementType: 'geometry', stylers: [{ color: '#0d1017' }] },
+  { elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#7d8492' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#0d1017' }] },
+  { featureType: 'administrative', elementType: 'geometry.stroke', stylers: [{ color: '#232833' }] },
+  { featureType: 'administrative.land_parcel', stylers: [{ visibility: 'off' }] },
+  { featureType: 'poi', stylers: [{ visibility: 'off' }] },
+  { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#131a16' }] },
+  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#1a1e27' }] },
+  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#242935' }] },
+  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#232936' }] },
+  { featureType: 'road.arterial', elementType: 'labels.text.fill', stylers: [{ color: '#8b93a1' }] },
+  { featureType: 'transit', stylers: [{ visibility: 'off' }] },
+  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0a1622' }] },
+];

@@ -1,13 +1,25 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Sparkles, TriangleAlert, OctagonAlert, Plus, Save, Route as RouteIcon, UtensilsCrossed, BedDouble, Check } from 'lucide-react';
 import GlassPanel from '../../components/ui/GlassPanel';
 import Button from '../../components/ui/Button';
 import { Input } from '../../components/ui/Field';
 import { dayColor } from '../../lib/dayColors';
-import { minutesToHHMM, geocodeAddress } from '../../lib/geo';
+import { minutesToHHMM, geocodeAddress, formatDuration } from '../../lib/geo';
 
-export default function ResultsPanel({ plan, activeDayFilter, onFilterChange, onAddSuggestion, onSaveTour, saving, defaultDayEnd, overnightHotels, onSetHotel, onSetDayEnd }) {
+export default function ResultsPanel({
+  plan,
+  activeDayFilter,
+  onFilterChange,
+  onAddSuggestion,
+  onSaveTour,
+  saving,
+  defaultDayEnd,
+  overnightHotels,
+  onSetHotel,
+  onSetDayEnd,
+  onSetDuration,
+}) {
   const [name, setName] = useState('');
 
   if (!plan) return null;
@@ -40,6 +52,7 @@ export default function ResultsPanel({ plan, activeDayFilter, onFilterChange, on
               onAddSuggestion={onAddSuggestion}
               defaultDayEnd={defaultDayEnd}
               onSetDayEnd={onSetDayEnd}
+              onSetDuration={onSetDuration}
             />
             {multiDay && i < plan.days.length - 1 && (
               <HotelPicker dayIdx={i} date={day.date} hotel={overnightHotels?.[i]} onSetHotel={onSetHotel} />
@@ -58,7 +71,7 @@ export default function ResultsPanel({ plan, activeDayFilter, onFilterChange, on
   );
 }
 
-function DayCard({ day, dayIdx, onAddSuggestion, defaultDayEnd, onSetDayEnd }) {
+function DayCard({ day, dayIdx, onAddSuggestion, defaultDayEnd, onSetDayEnd, onSetDuration }) {
   const color = dayColor(dayIdx);
   const distKm = (day.totalDistanceM / 1000).toFixed(0);
   const durH = (day.totalDurationS / 3600).toFixed(1);
@@ -112,6 +125,8 @@ function DayCard({ day, dayIdx, onAddSuggestion, defaultDayEnd, onSetDayEnd }) {
         </div>
       )}
 
+      <DayTimeline sched={sched} color={color} />
+
       <div className="flex flex-col gap-2">
         {sched?.events.map((ev, idx) => {
           if (ev.type === 'lunch') {
@@ -143,6 +158,7 @@ function DayCard({ day, dayIdx, onAddSuggestion, defaultDayEnd, onSetDayEnd }) {
               <div className="text-[11px] text-ink-muted text-right shrink-0">
                 {minutesToHHMM(ev.arrivalMin)}
                 <div className="text-[10px] text-ink-faint">part {minutesToHHMM(ev.recommendedDepartureMin)}</div>
+                {onSetDuration && <DurationEditor clientId={ev.client.id} value={ev.durationMin} onSetDuration={onSetDuration} />}
               </div>
             </div>
           );
@@ -150,30 +166,114 @@ function DayCard({ day, dayIdx, onAddSuggestion, defaultDayEnd, onSetDayEnd }) {
         {!sched && <div className="text-[11px] text-ink-faint">Aucun client ce jour-là.</div>}
       </div>
 
-      {day.suggestions?.length > 0 && (
-        <div className="mt-3.5 pt-3.5 border-t border-border/10">
-          <div className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-ink-faint mb-2">
-            <Sparkles size={11} /> Suggestions à proximité
-          </div>
-          <div className="flex flex-col gap-1.5">
-            {day.suggestions.map((s) => (
-              <div key={s.client.id} className="flex items-center gap-2 rounded-lg border border-dashed border-border/20 px-2.5 py-2">
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs font-medium truncate">{s.client.name}</div>
-                  <div className="text-[10.5px] text-ink-faint">{s.client.city || ''} — {s.distanceKm.toFixed(1)} km</div>
-                </div>
-                <button
-                  onClick={() => onAddSuggestion(s.client.id)}
-                  className="shrink-0 w-6 h-6 rounded-md bg-accent/15 text-accent flex items-center justify-center hover:bg-accent/25 transition-colors"
-                >
-                  <Plus size={13} />
-                </button>
-              </div>
-            ))}
-          </div>
+      {(day.suggestions?.onRoute?.length > 0 || day.suggestions?.nearby?.length > 0) && (
+        <div className="mt-3.5 pt-3.5 border-t border-border/10 flex flex-col gap-3">
+          <SuggestionList title="Sur ta route" items={day.suggestions.onRoute} onAdd={onAddSuggestion} />
+          <SuggestionList title="À proximité" items={day.suggestions.nearby} onAdd={onAddSuggestion} showDetour />
         </div>
       )}
     </motion.div>
+  );
+}
+
+// Barre proportionnelle du déroulé de la journée (trajets / visites / pause), pour visualiser
+// d'un coup d'œil les horaires entre chaque rendez-vous.
+function DayTimeline({ sched, color }) {
+  if (!sched || !sched.stops.length) return null;
+  const start = sched.stops[0].recommendedDepartureMin;
+  const end = sched.endOfDayMin;
+  if (end <= start) return null;
+
+  const segments = [];
+  let prevEnd = start;
+  for (const ev of sched.events) {
+    if (ev.type === 'lunch') {
+      if (ev.startMin > prevEnd) segments.push({ type: 'travel', min: ev.startMin - prevEnd });
+      segments.push({ type: 'lunch', min: ev.endMin - ev.startMin, label: 'Pause déjeuner' });
+      prevEnd = ev.endMin;
+    } else {
+      if (ev.arrivalMin > prevEnd) segments.push({ type: 'travel', min: ev.arrivalMin - prevEnd });
+      segments.push({ type: 'visit', min: ev.departureMin - ev.arrivalMin, label: ev.client.name });
+      prevEnd = ev.departureMin;
+    }
+  }
+  if (end > prevEnd) segments.push({ type: 'travel', min: end - prevEnd, label: 'Retour' });
+
+  return (
+    <div className="mb-3.5">
+      <div className="flex h-2 rounded-full overflow-hidden gap-[2px]">
+        {segments.map((seg, i) => (
+          <div
+            key={i}
+            title={`${seg.label ? seg.label + ' — ' : 'Trajet — '}${formatDuration(seg.min)}`}
+            className={`rounded-full ${seg.type === 'travel' ? 'bg-ink-faint/25' : seg.type === 'lunch' ? 'bg-warning/70' : ''}`}
+            style={{ flex: `${Math.max(seg.min, 3)} 0 0%`, background: seg.type === 'visit' ? color : undefined }}
+          />
+        ))}
+      </div>
+      <div className="flex justify-between text-[10px] text-ink-faint mt-1">
+        <span>{minutesToHHMM(start)}</span>
+        <span>{minutesToHHMM(end)}</span>
+      </div>
+    </div>
+  );
+}
+
+function DurationEditor({ clientId, value, onSetDuration }) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+
+  function commit() {
+    const n = Number(draft);
+    if (n > 0 && n !== value) onSetDuration(clientId, n);
+    else setDraft(value);
+  }
+
+  return (
+    <div className="flex items-center gap-0.5 justify-end text-[10px] text-ink-faint mt-0.5">
+      <input
+        type="number"
+        min={5}
+        step={5}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onFocus={(e) => e.target.select()}
+        onBlur={commit}
+        onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+        className="w-8 bg-transparent border-none outline-none text-right"
+      />
+      min
+    </div>
+  );
+}
+
+function SuggestionList({ title, items, onAdd, showDetour }) {
+  if (!items?.length) return null;
+  return (
+    <div>
+      <div className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-ink-faint mb-2">
+        <Sparkles size={11} /> {title}
+      </div>
+      <div className="flex flex-col gap-1.5">
+        {items.map((s) => (
+          <div key={s.client.id} className="flex items-center gap-2 rounded-lg border border-dashed border-border/20 px-2.5 py-2">
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-medium truncate">{s.client.name}</div>
+              <div className="text-[10.5px] text-ink-faint">
+                {s.client.city || ''} — {s.distanceKm.toFixed(1)} km
+                {showDetour && s.detourMin > 0.5 && <span> · +{formatDuration(s.detourMin)}</span>}
+              </div>
+            </div>
+            <button
+              onClick={() => onAdd(s.client.id)}
+              className="shrink-0 w-6 h-6 rounded-md bg-accent/15 text-accent flex items-center justify-center hover:bg-accent/25 transition-colors"
+            >
+              <Plus size={13} />
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -244,12 +344,4 @@ function TabPill({ active, onClick, children, dot }) {
 function formatDateFR(isoDate) {
   const d = new Date(isoDate + 'T00:00:00');
   return d.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: 'short' });
-}
-
-function formatDuration(totalMin) {
-  const h = Math.floor(totalMin / 60);
-  const m = Math.round(totalMin % 60);
-  if (h <= 0) return `${m} min`;
-  if (m === 0) return `${h} h`;
-  return `${h} h ${m}`;
 }
