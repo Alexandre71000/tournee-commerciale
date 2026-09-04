@@ -341,6 +341,11 @@ function focusCamera(mode, map, focusPoints) {
     const bounds = new google.maps.LatLngBounds();
     focusPoints.forEach((p) => bounds.extend({ lat: p.lat, lng: p.lng }));
     map.fitBounds(bounds, 64);
+    // Un seul point (ex. juste le domicile, pas encore de tournée générée) fait zoomer fitBounds
+    // au niveau rue — on plafonne à un niveau ville une fois le zoom appliqué.
+    google.maps.event.addListenerOnce(map, 'bounds_changed', () => {
+      if (map.getZoom() > 13) map.setZoom(13);
+    });
   }
 }
 

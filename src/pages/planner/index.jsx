@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
+import { Wand2, Route as RouteIcon } from 'lucide-react';
 import Map3D from '../../components/map/Map3D';
+import FloatingWindow from '../../components/ui/FloatingWindow';
 import ConfigPanel from './ConfigPanel';
 import ResultsPanel from './ResultsPanel';
 import { useAppData } from '../../context/AppDataContext';
@@ -194,32 +196,54 @@ export default function PlannerPage() {
         <Map3D home={plan?.home || (settings.home_lat ? { lat: settings.home_lat, lng: settings.home_lng } : null)} days={plan?.days || []} activeDayFilter={activeDayFilter} />
       </div>
 
-      <div className="absolute inset-0 p-5 flex items-start gap-4 pointer-events-none">
-        <ConfigPanel
-          clients={clients}
-          sector={sector}
-          onSectorChange={setSector}
-          dates={dates}
-          onAddDate={addDate}
-          onRemoveDate={removeDate}
-          selectedIds={selectedIds}
-          onToggleClient={toggleClient}
-          onGenerate={() => generate()}
-          generating={generating}
-        />
-        <ResultsPanel
-          plan={plan}
-          activeDayFilter={activeDayFilter}
-          onFilterChange={setActiveDayFilter}
-          onAddSuggestion={addSuggestion}
-          onSaveTour={handleSaveTour}
-          saving={saving}
-          defaultDayEnd={settings.day_end}
-          overnightHotels={overnightHotels}
-          onSetHotel={setHotelForDay}
-          onSetDayEnd={setDayEndForDay}
-          onSetDuration={setDurationForStop}
-        />
+      <div className="absolute inset-0 pointer-events-none">
+        <FloatingWindow
+          id="planner-config"
+          title="Planifier une tournée"
+          icon={Wand2}
+          defaultPosition={{ x: 20, y: 20 }}
+          defaultSize={{ width: 380, height: 640 }}
+          minWidth={320}
+          minHeight={320}
+        >
+          <ConfigPanel
+            clients={clients}
+            sector={sector}
+            onSectorChange={setSector}
+            dates={dates}
+            onAddDate={addDate}
+            onRemoveDate={removeDate}
+            selectedIds={selectedIds}
+            onToggleClient={toggleClient}
+            onGenerate={() => generate()}
+            generating={generating}
+          />
+        </FloatingWindow>
+        {plan && (
+          <FloatingWindow
+            id="planner-results"
+            title="Itinéraire"
+            icon={RouteIcon}
+            defaultPosition={{ x: 416, y: 20 }}
+            defaultSize={{ width: 400, height: 640 }}
+            minWidth={340}
+            minHeight={320}
+          >
+            <ResultsPanel
+              plan={plan}
+              activeDayFilter={activeDayFilter}
+              onFilterChange={setActiveDayFilter}
+              onAddSuggestion={addSuggestion}
+              onSaveTour={handleSaveTour}
+              saving={saving}
+              defaultDayEnd={settings.day_end}
+              overnightHotels={overnightHotels}
+              onSetHotel={setHotelForDay}
+              onSetDayEnd={setDayEndForDay}
+              onSetDuration={setDurationForStop}
+            />
+          </FloatingWindow>
+        )}
       </div>
     </div>
   );

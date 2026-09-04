@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { MapPin, CalendarPlus, Search, Wand2, X } from 'lucide-react';
-import GlassPanel, { PanelLabel } from '../../components/ui/GlassPanel';
+import { PanelLabel } from '../../components/ui/GlassPanel';
 import { Select, Input } from '../../components/ui/Field';
 import Button from '../../components/ui/Button';
 import ProgressBar from '../../components/ui/ProgressBar';
@@ -33,11 +33,8 @@ export default function ConfigPanel({
   );
 
   return (
-    <GlassPanel strong className="pointer-events-auto w-[380px] max-h-full flex flex-col p-5 gap-5 overflow-hidden">
-      <div>
-        <h1 className="font-display text-lg font-semibold tracking-tight">Planifier une tournée</h1>
-        <p className="text-xs text-ink-muted mt-1">Secteur, jours de déplacement, clients à voir.</p>
-      </div>
+    <div className="h-full flex flex-col p-5 gap-4 overflow-hidden">
+      <p className="text-xs text-ink-muted -mt-1">Secteur, jours de déplacement, clients à voir.</p>
 
       <div className="flex-1 overflow-y-auto -mr-2 pr-2 flex flex-col gap-5">
         <div>
@@ -117,7 +114,7 @@ export default function ConfigPanel({
           </div>
         )}
       </div>
-    </GlassPanel>
+    </div>
   );
 }
 

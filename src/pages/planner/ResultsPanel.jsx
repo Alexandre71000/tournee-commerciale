@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Sparkles, TriangleAlert, OctagonAlert, Plus, Save, Route as RouteIcon, UtensilsCrossed, BedDouble, Check } from 'lucide-react';
-import GlassPanel from '../../components/ui/GlassPanel';
+import { Sparkles, TriangleAlert, OctagonAlert, Plus, Save, UtensilsCrossed, BedDouble, Check } from 'lucide-react';
 import Button from '../../components/ui/Button';
 import { Input } from '../../components/ui/Field';
 import { dayColor } from '../../lib/dayColors';
@@ -26,13 +25,8 @@ export default function ResultsPanel({
   const multiDay = plan.days.length > 1;
 
   return (
-    <GlassPanel strong className="pointer-events-auto w-[400px] max-h-full flex flex-col overflow-hidden">
-      <div className="p-5 pb-3 flex items-center gap-2">
-        <RouteIcon size={16} className="text-accent" />
-        <h2 className="font-display font-semibold text-sm">Itinéraire</h2>
-      </div>
-
-      <div className="px-5 flex gap-1.5 flex-wrap pb-3">
+    <div className="h-full flex flex-col overflow-hidden">
+      <div className="px-5 pt-4 flex gap-1.5 flex-wrap pb-3">
         <TabPill active={activeDayFilter === 'all'} onClick={() => onFilterChange('all')}>
           Tous les jours
         </TabPill>
@@ -67,7 +61,7 @@ export default function ResultsPanel({
           <Save size={15} /> {saving ? '…' : 'Enregistrer'}
         </Button>
       </div>
-    </GlassPanel>
+    </div>
   );
 }
 
