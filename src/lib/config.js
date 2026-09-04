@@ -10,7 +10,7 @@ export const CONFIG = {
   // Réglages métier par défaut (modifiables ensuite dans l'app > Réglages)
   DEFAULT_VISIT_DURATION_MIN: 45,
   DEFAULT_DAY_START: '08:30',
-  DEFAULT_MAX_DAY_HOURS: 9,
+  DEFAULT_DAY_END: '18:00',
   DEFAULT_LUNCH_BREAK_MIN: 60,
   SUGGESTION_RADIUS_KM: 5,
 };

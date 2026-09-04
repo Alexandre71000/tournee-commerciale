@@ -8,7 +8,9 @@ const TIGHT_MARGIN_MIN = 30; // journée jugée "serrée" si elle se termine dan
 //   dates: ['2026-09-08', ...],
 //   mustVisitClients: [client...] (avec lat/lng déjà géocodés),
 //   candidateClients: [client...] (pool du secteur pour les suggestions, hors mustVisit),
-//   dayStart: 'HH:MM', visitDurationMin, lunchBreakMin, suggestionRadiusKm, maxDayHours,
+//   dayStart: 'HH:MM', visitDurationMin, lunchBreakMin, suggestionRadiusKm,
+//   dayEndTimes: ['HH:MM', ...] — heure de fin souhaitée pour le jour i (défaut si absent : '18:00'),
+//     modifiable jour par jour pour un impératif ponctuel.
 //   overnightHotels: [{lat,lng,address} | null, ...] — hôtel utilisé pour la nuit après le jour i
 //     (donc point de départ du jour i+1). Optionnel, absent = on repart toujours de `home`.
 // }
@@ -22,13 +24,12 @@ export async function buildTourPlan(params) {
     visitDurationMin,
     lunchBreakMin,
     suggestionRadiusKm,
-    maxDayHours,
+    dayEndTimes = [],
     overnightHotels = [],
   } = params;
 
   const numDays = dates.length;
   const groups = splitIntoDayGroups(mustVisitClients, numDays);
-  const budgetMin = maxDayHours * 60;
 
   const days = [];
   for (let i = 0; i < numDays; i++) {
@@ -50,11 +51,13 @@ export async function buildTourPlan(params) {
       ? rankSuggestions(candidateClients, route ? route.orderedStops : dayClients, suggestionRadiusKm)
       : [];
 
+    const dayEnd = dayEndTimes[i] || '18:00';
+    const dayEndMin = toMinutes(dayEnd);
+
     let status = 'ok';
     let overloadMin = 0;
     if (schedule) {
-      const daySpanMin = schedule.endOfDayMin - schedule.dayStartMin;
-      overloadMin = daySpanMin - budgetMin;
+      overloadMin = schedule.endOfDayMin - dayEndMin;
       if (overloadMin > 0) status = 'infeasible';
       else if (overloadMin > -TIGHT_MARGIN_MIN) status = 'tight';
     }
@@ -69,6 +72,7 @@ export async function buildTourPlan(params) {
       totalDurationS: route ? route.totalDurationS : 0,
       schedule,
       suggestions,
+      dayEnd,
       status,
       overloadMin,
       // rétro-compatibilité : anciens consommateurs qui lisent `overloaded`
@@ -79,6 +83,11 @@ export async function buildTourPlan(params) {
   dedupeSuggestionsAcrossDays(days);
 
   return { home, dates, days };
+}
+
+function toMinutes(hhmm) {
+  const [h, m] = hhmm.split(':').map(Number);
+  return h * 60 + m;
 }
 
 function rankSuggestions(candidateClients, dayStops, radiusKm) {

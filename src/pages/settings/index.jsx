@@ -63,8 +63,8 @@ export default function SettingsPage() {
           <Field label="Durée moyenne d'une visite (min)">
             <Input type="number" min={5} step={5} value={form.default_visit_duration_min || ''} onChange={set('default_visit_duration_min', Number)} />
           </Field>
-          <Field label="Durée max. d'une journée (h)">
-            <Input type="number" min={1} step={0.5} value={form.max_day_hours || ''} onChange={set('max_day_hours', Number)} />
+          <Field label="Heure de fin de journée">
+            <Input type="time" value={form.day_end || ''} onChange={set('day_end')} />
           </Field>
         </div>
         <div className="grid grid-cols-2 gap-3.5">

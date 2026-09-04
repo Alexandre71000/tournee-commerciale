@@ -7,7 +7,7 @@ import { Input } from '../../components/ui/Field';
 import { dayColor } from '../../lib/dayColors';
 import { minutesToHHMM, geocodeAddress } from '../../lib/geo';
 
-export default function ResultsPanel({ plan, activeDayFilter, onFilterChange, onAddSuggestion, onSaveTour, saving, maxDayHours, overnightHotels, onSetHotel }) {
+export default function ResultsPanel({ plan, activeDayFilter, onFilterChange, onAddSuggestion, onSaveTour, saving, defaultDayEnd, overnightHotels, onSetHotel, onSetDayEnd }) {
   const [name, setName] = useState('');
 
   if (!plan) return null;
@@ -34,7 +34,13 @@ export default function ResultsPanel({ plan, activeDayFilter, onFilterChange, on
       <div className="flex-1 overflow-y-auto px-5 pb-4 flex flex-col gap-3">
         {plan.days.map((day, i) => (
           <div key={day.date} className="flex flex-col gap-3">
-            <DayCard day={day} dayIdx={i} onAddSuggestion={onAddSuggestion} maxDayHours={maxDayHours} />
+            <DayCard
+              day={day}
+              dayIdx={i}
+              onAddSuggestion={onAddSuggestion}
+              defaultDayEnd={defaultDayEnd}
+              onSetDayEnd={onSetDayEnd}
+            />
             {multiDay && i < plan.days.length - 1 && (
               <HotelPicker dayIdx={i} date={day.date} hotel={overnightHotels?.[i]} onSetHotel={onSetHotel} />
             )}
@@ -52,18 +58,33 @@ export default function ResultsPanel({ plan, activeDayFilter, onFilterChange, on
   );
 }
 
-function DayCard({ day, dayIdx, onAddSuggestion, maxDayHours }) {
+function DayCard({ day, dayIdx, onAddSuggestion, defaultDayEnd, onSetDayEnd }) {
   const color = dayColor(dayIdx);
   const distKm = (day.totalDistanceM / 1000).toFixed(0);
   const durH = (day.totalDurationS / 3600).toFixed(1);
   const sched = day.schedule;
+  const dayEndValue = day.dayEnd || defaultDayEnd;
+  const isCustomDayEnd = day.dayEnd && day.dayEnd !== defaultDayEnd;
   let stopNumber = 0;
 
   return (
     <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="rounded-xl border border-border/10 bg-surface-3/40 p-4">
-      <div className="flex items-center gap-2 mb-1">
-        <span className="w-2 h-2 rounded-full" style={{ background: color }} />
-        <span className="font-medium text-sm">{formatDateFR(day.date)}</span>
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full" style={{ background: color }} />
+          <span className="font-medium text-sm">{formatDateFR(day.date)}</span>
+        </div>
+        {onSetDayEnd && (
+          <label className={`flex items-center gap-1.5 text-[10.5px] ${isCustomDayEnd ? 'text-accent' : 'text-ink-faint'}`}>
+            Fin à
+            <input
+              type="time"
+              value={dayEndValue || ''}
+              onChange={(e) => e.target.value && onSetDayEnd(dayIdx, e.target.value)}
+              className="bg-transparent border-none outline-none font-medium w-[62px] cursor-pointer"
+            />
+          </label>
+        )}
       </div>
       <div className="flex gap-3 text-[11px] text-ink-faint mb-3">
         <span>{sched ? sched.stops.length : 0} visite(s)</span>
@@ -76,13 +97,13 @@ function DayCard({ day, dayIdx, onAddSuggestion, maxDayHours }) {
         <div className="flex items-start gap-2 rounded-lg bg-danger/15 text-danger text-[11.5px] font-semibold px-3 py-2.5 mb-3">
           <OctagonAlert size={15} className="shrink-0 mt-0.5" />
           <span>
-            Non réalisable dans le temps imparti — dépasse de {formatDuration(day.overloadMin)}. Retire un client ou ajoute un jour.
+            Non réalisable dans le temps imparti — dépasse de {formatDuration(day.overloadMin)}. Retire un client, ajoute un jour ou recule l'heure de fin ci-dessus.
           </span>
         </div>
       )}
       {day.status === 'tight' && (
         <div className="flex items-center gap-2 rounded-lg bg-warning/12 text-warning text-[11px] font-medium px-3 py-2 mb-3">
-          <TriangleAlert size={13} className="shrink-0" /> Journée serrée — tu termines proche de ta limite ({maxDayHours} h).
+          <TriangleAlert size={13} className="shrink-0" /> Journée serrée — tu termines proche de ta limite ({dayEndValue}).
         </div>
       )}
       {sched?.firstDepartureEarlierMin > 0 && (
