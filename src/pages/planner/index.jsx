@@ -21,6 +21,8 @@ export default function PlannerPage() {
   const [overnightHotels, setOvernightHotels] = useState({}); // { [dayIndex]: {lat,lng,address} }
   const [dayEndOverrides, setDayEndOverrides] = useState({}); // { [dayIndex]: 'HH:MM' }
   const [durationOverrides, setDurationOverrides] = useState({}); // { [clientId]: minutes }
+  const [fixedTimesByDay, setFixedTimesByDay] = useState({}); // { [dayIndex]: { [clientId]: 'HH:MM' } }
+  const [missionsByDay, setMissionsByDay] = useState({}); // { [dayIndex]: [{id,label,address,lat,lng,time,durationMin}] }
   const [plan, setPlan] = useState(null);
   const [activeDayFilter, setActiveDayFilter] = useState('all');
   const [generating, setGenerating] = useState(false);
@@ -48,6 +50,7 @@ export default function PlannerPage() {
         dayEnd: d.dayEnd || settings.day_end,
         status: 'ok',
         overloadMin: 0,
+        fixedConflict: null,
         overloaded: false,
       })),
     });
@@ -68,22 +71,27 @@ export default function PlannerPage() {
   }, []);
   const removeDate = useCallback((d) => setDates((prev) => prev.filter((x) => x !== d)), []);
 
+  // `overrides` permet à un appelant (suggestion ajoutée, hôtel choisi, durée modifiée…) de fournir
+  // une valeur plus fraîche que l'état React courant (pas encore re-rendu) pour tel ou tel réglage,
+  // sans devoir refaire défiler une longue liste de paramètres positionnels.
   const generate = useCallback(
-    async (extraSelectedIds, hotelsOverride, dayEndOverride, durationOverride) => {
+    async (overrides = {}) => {
       if (!settings.home_lat) return toast('Configure ton adresse de départ dans Réglages', 'error');
       if (!dates.length) return toast('Ajoute au moins un jour de déplacement', 'error');
-      const ids = extraSelectedIds || selectedIds;
+      const ids = overrides.selectedIds || selectedIds;
       if (!ids.size) return toast('Sélectionne au moins un client à visiter', 'error');
 
       setGenerating(true);
       try {
         const mustVisit = clients.filter((c) => ids.has(c.id) && c.lat != null);
         const candidatePool = clients.filter((c) => c.lat != null && !ids.has(c.id) && (!sector || c.sector === sector));
-        const hotelsMap = hotelsOverride || overnightHotels;
+        const hotelsMap = overrides.hotels || overnightHotels;
         const hotelsArray = dates.slice(0, -1).map((_, i) => hotelsMap[i] || null);
-        const dayEndMap = dayEndOverride || dayEndOverrides;
+        const dayEndMap = overrides.dayEnds || dayEndOverrides;
         const dayEndArray = dates.map((_, i) => dayEndMap[i] || settings.day_end);
-        const durationMap = durationOverride || durationOverrides;
+        const durationMap = overrides.durations || durationOverrides;
+        const fixedTimesMap = overrides.fixedTimes || fixedTimesByDay;
+        const missionsMap = overrides.missions || missionsByDay;
 
         const result = await buildTourPlan({
           home: { lat: settings.home_lat, lng: settings.home_lng },
@@ -97,6 +105,8 @@ export default function PlannerPage() {
           dayEndTimes: dayEndArray,
           overnightHotels: hotelsArray,
           durationOverrides: durationMap,
+          fixedTimesByDay: fixedTimesMap,
+          missionsByDay: missionsMap,
         });
         setPlan(result);
         setActiveDayFilter('all');
@@ -107,7 +117,7 @@ export default function PlannerPage() {
         setGenerating(false);
       }
     },
-    [clients, dates, sector, selectedIds, overnightHotels, dayEndOverrides, durationOverrides, settings, toast]
+    [clients, dates, sector, selectedIds, overnightHotels, dayEndOverrides, durationOverrides, fixedTimesByDay, missionsByDay, settings, toast]
   );
 
   const addSuggestion = useCallback(
@@ -115,7 +125,7 @@ export default function PlannerPage() {
       setSelectedIds((prev) => {
         const next = new Set(prev);
         next.add(clientId);
-        generate(next);
+        generate({ selectedIds: next });
         return next;
       });
     },
@@ -126,7 +136,7 @@ export default function PlannerPage() {
     (dayIndex, hotel) => {
       setOvernightHotels((prev) => {
         const next = { ...prev, [dayIndex]: hotel };
-        generate(null, next);
+        generate({ hotels: next });
         return next;
       });
     },
@@ -137,7 +147,7 @@ export default function PlannerPage() {
     (dayIndex, hhmm) => {
       setDayEndOverrides((prev) => {
         const next = { ...prev, [dayIndex]: hhmm };
-        generate(null, null, next);
+        generate({ dayEnds: next });
         return next;
       });
     },
@@ -148,7 +158,44 @@ export default function PlannerPage() {
     (clientId, minutes) => {
       setDurationOverrides((prev) => {
         const next = { ...prev, [clientId]: minutes };
-        generate(null, null, null, next);
+        generate({ durations: next });
+        return next;
+      });
+    },
+    [generate]
+  );
+
+  // hhmm === null retire l'horaire fixé (le client redevient un arrêt libre, réoptimisé normalement).
+  const setFixedTimeForStop = useCallback(
+    (dayIndex, clientId, hhmm) => {
+      setFixedTimesByDay((prev) => {
+        const dayMap = { ...(prev[dayIndex] || {}) };
+        if (hhmm) dayMap[clientId] = hhmm;
+        else delete dayMap[clientId];
+        const next = { ...prev, [dayIndex]: dayMap };
+        generate({ fixedTimes: next });
+        return next;
+      });
+    },
+    [generate]
+  );
+
+  const addMission = useCallback(
+    (dayIndex, mission) => {
+      setMissionsByDay((prev) => {
+        const next = { ...prev, [dayIndex]: [...(prev[dayIndex] || []), mission] };
+        generate({ missions: next });
+        return next;
+      });
+    },
+    [generate]
+  );
+
+  const removeMission = useCallback(
+    (dayIndex, missionId) => {
+      setMissionsByDay((prev) => {
+        const next = { ...prev, [dayIndex]: (prev[dayIndex] || []).filter((m) => m.id !== missionId) };
+        generate({ missions: next });
         return next;
       });
     },
@@ -241,6 +288,10 @@ export default function PlannerPage() {
               onSetHotel={setHotelForDay}
               onSetDayEnd={setDayEndForDay}
               onSetDuration={setDurationForStop}
+              fixedTimesByDay={fixedTimesByDay}
+              onSetFixedTime={setFixedTimeForStop}
+              onAddMission={addMission}
+              onRemoveMission={removeMission}
             />
           </FloatingWindow>
         )}

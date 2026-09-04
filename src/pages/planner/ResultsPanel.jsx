@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Sparkles, TriangleAlert, OctagonAlert, Plus, Save, UtensilsCrossed, BedDouble, Check } from 'lucide-react';
+import { Sparkles, TriangleAlert, OctagonAlert, Plus, Save, UtensilsCrossed, BedDouble, Check, Pin, Briefcase, X } from 'lucide-react';
 import Button from '../../components/ui/Button';
 import { Input } from '../../components/ui/Field';
 import { dayColor } from '../../lib/dayColors';
@@ -18,6 +18,10 @@ export default function ResultsPanel({
   onSetHotel,
   onSetDayEnd,
   onSetDuration,
+  fixedTimesByDay,
+  onSetFixedTime,
+  onAddMission,
+  onRemoveMission,
 }) {
   const [name, setName] = useState('');
 
@@ -47,6 +51,10 @@ export default function ResultsPanel({
               defaultDayEnd={defaultDayEnd}
               onSetDayEnd={onSetDayEnd}
               onSetDuration={onSetDuration}
+              fixedTimesForDay={fixedTimesByDay?.[i] || {}}
+              onSetFixedTime={onSetFixedTime}
+              onAddMission={onAddMission}
+              onRemoveMission={onRemoveMission}
             />
             {multiDay && i < plan.days.length - 1 && (
               <HotelPicker dayIdx={i} date={day.date} hotel={overnightHotels?.[i]} onSetHotel={onSetHotel} />
@@ -65,7 +73,7 @@ export default function ResultsPanel({
   );
 }
 
-function DayCard({ day, dayIdx, onAddSuggestion, defaultDayEnd, onSetDayEnd, onSetDuration }) {
+function DayCard({ day, dayIdx, onAddSuggestion, defaultDayEnd, onSetDayEnd, onSetDuration, fixedTimesForDay, onSetFixedTime, onAddMission, onRemoveMission }) {
   const color = dayColor(dayIdx);
   const distKm = (day.totalDistanceM / 1000).toFixed(0);
   const durH = (day.totalDurationS / 3600).toFixed(1);
@@ -100,7 +108,16 @@ function DayCard({ day, dayIdx, onAddSuggestion, defaultDayEnd, onSetDayEnd, onS
         {sched && <span>retour ~{minutesToHHMM(sched.endOfDayMin)}</span>}
       </div>
 
-      {day.status === 'infeasible' && (
+      {day.fixedConflict && (
+        <div className="flex items-start gap-2 rounded-lg bg-danger/15 text-danger text-[11.5px] font-semibold px-3 py-2.5 mb-3">
+          <OctagonAlert size={15} className="shrink-0 mt-0.5" />
+          <span>
+            RDV fixé « {day.fixedConflict.label} » à {minutesToHHMM(day.fixedConflict.timeMin)} intenable — tu arriverais à{' '}
+            {minutesToHHMM(day.fixedConflict.arrivalMin)} ({formatDuration(day.fixedConflict.lateByMin)} de retard). Retire un arrêt avant ou décale l'horaire fixé.
+          </span>
+        </div>
+      )}
+      {day.status === 'infeasible' && !day.fixedConflict && (
         <div className="flex items-start gap-2 rounded-lg bg-danger/15 text-danger text-[11.5px] font-semibold px-3 py-2.5 mb-3">
           <OctagonAlert size={15} className="shrink-0 mt-0.5" />
           <span>
@@ -136,6 +153,29 @@ function DayCard({ day, dayIdx, onAddSuggestion, defaultDayEnd, onSetDayEnd, onS
               </div>
             );
           }
+          if (ev.type === 'mission') {
+            return (
+              <div key={ev.mission.id} className="flex items-center gap-2.5 rounded-lg bg-surface-3/70 px-2.5 py-2">
+                <span className="w-5 h-5 rounded-full flex items-center justify-center text-warning bg-warning/15 shrink-0">
+                  <Briefcase size={11} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-medium truncate">{ev.mission.label}</div>
+                  {ev.mission.address && <div className="text-[10.5px] text-ink-faint truncate">{ev.mission.address}</div>}
+                </div>
+                <div className="text-[11px] text-ink-muted text-right shrink-0 flex items-center gap-1.5">
+                  <span>
+                    {minutesToHHMM(ev.arrivalMin)}–{minutesToHHMM(ev.departureMin)}
+                  </span>
+                  {onRemoveMission && (
+                    <button onClick={() => onRemoveMission(dayIdx, ev.mission.id)} className="text-ink-faint hover:text-danger">
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          }
           stopNumber += 1;
           return (
             <div key={ev.client.id || idx} className="flex items-center gap-2.5">
@@ -143,22 +183,38 @@ function DayCard({ day, dayIdx, onAddSuggestion, defaultDayEnd, onSetDayEnd, onS
                 className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-surface shrink-0"
                 style={{ background: color }}
               >
-                {stopNumber}
+                {ev.fixed ? <Pin size={10} /> : stopNumber}
               </span>
               <div className="min-w-0 flex-1">
                 <div className="text-xs font-medium truncate">{ev.client.name}</div>
                 <div className="text-[10.5px] text-ink-faint truncate">{[ev.client.address, ev.client.city].filter(Boolean).join(', ')}</div>
+                {ev.lateByMin > 0 && <div className="text-[10px] text-danger font-medium">en retard de {formatDuration(ev.lateByMin)}</div>}
               </div>
               <div className="text-[11px] text-ink-muted text-right shrink-0">
                 {minutesToHHMM(ev.arrivalMin)}
-                <div className="text-[10px] text-ink-faint">part {minutesToHHMM(ev.recommendedDepartureMin)}</div>
+                {!ev.fixed && <div className="text-[10px] text-ink-faint">part {minutesToHHMM(ev.recommendedDepartureMin)}</div>}
                 {onSetDuration && <DurationEditor clientId={ev.client.id} value={ev.durationMin} onSetDuration={onSetDuration} />}
+                {onSetFixedTime && (
+                  <FixedTimeToggle
+                    dayIdx={dayIdx}
+                    clientId={ev.client.id}
+                    arrivalMin={ev.arrivalMin}
+                    fixedTime={fixedTimesForDay?.[ev.client.id]}
+                    onSetFixedTime={onSetFixedTime}
+                  />
+                )}
               </div>
             </div>
           );
         })}
         {!sched && <div className="text-[11px] text-ink-faint">Aucun client ce jour-là.</div>}
       </div>
+
+      {onAddMission && (
+        <div className="mt-3">
+          <MissionAdder dayIdx={dayIdx} onAddMission={onAddMission} />
+        </div>
+      )}
 
       {(day.suggestions?.onRoute?.length > 0 || day.suggestions?.nearby?.length > 0) && (
         <div className="mt-3.5 pt-3.5 border-t border-border/10 flex flex-col gap-3">
@@ -185,6 +241,10 @@ function DayTimeline({ sched, color }) {
       if (ev.startMin > prevEnd) segments.push({ type: 'travel', min: ev.startMin - prevEnd });
       segments.push({ type: 'lunch', min: ev.endMin - ev.startMin, label: 'Pause déjeuner' });
       prevEnd = ev.endMin;
+    } else if (ev.type === 'mission') {
+      if (ev.arrivalMin > prevEnd) segments.push({ type: 'travel', min: ev.arrivalMin - prevEnd });
+      segments.push({ type: 'lunch', min: ev.departureMin - ev.arrivalMin, label: ev.mission.label });
+      prevEnd = ev.departureMin;
     } else {
       if (ev.arrivalMin > prevEnd) segments.push({ type: 'travel', min: ev.arrivalMin - prevEnd });
       segments.push({ type: 'visit', min: ev.departureMin - ev.arrivalMin, label: ev.client.name });
@@ -237,6 +297,123 @@ function DurationEditor({ clientId, value, onSetDuration }) {
         className="w-8 bg-transparent border-none outline-none text-right"
       />
       min
+    </div>
+  );
+}
+
+// Permet de figer l'heure d'un arrêt à une valeur précise (ex. le client n'était dispo qu'à ce
+// créneau) : les autres visites de la journée se réorganisent alors autour de ce point fixe.
+function FixedTimeToggle({ dayIdx, clientId, arrivalMin, fixedTime, onSetFixedTime }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(fixedTime || minutesToHHMM(arrivalMin));
+
+  if (fixedTime) {
+    return (
+      <button
+        onClick={() => onSetFixedTime(dayIdx, clientId, null)}
+        className="flex items-center gap-1 text-[10px] text-accent font-medium mt-0.5 ml-auto"
+        title="Heure fixée — cliquer pour libérer"
+      >
+        <Pin size={9} /> fixé
+      </button>
+    );
+  }
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-1 mt-0.5 justify-end">
+        <input
+          type="time"
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          className="bg-transparent border-none outline-none text-[10px] text-ink-faint w-[52px]"
+        />
+        <button
+          onClick={() => {
+            onSetFixedTime(dayIdx, clientId, draft);
+            setEditing(false);
+          }}
+          className="text-accent"
+        >
+          <Check size={11} />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <button onClick={() => setEditing(true)} className="flex items-center gap-1 text-[10px] text-ink-faint hover:text-accent mt-0.5 ml-auto">
+      <Pin size={9} /> fixer
+    </button>
+  );
+}
+
+// Formulaire compact pour insérer une mission bloquante dans la journée (ex. aller chercher
+// quelqu'un à l'aéroport) — adresse optionnelle : sans adresse, le créneau est juste réservé.
+function MissionAdder({ dayIdx, onAddMission }) {
+  const [open, setOpen] = useState(false);
+  const [label, setLabel] = useState('');
+  const [address, setAddress] = useState('');
+  const [time, setTime] = useState('');
+  const [duration, setDuration] = useState(30);
+  const [loading, setLoading] = useState(false);
+
+  async function handleAdd() {
+    if (!label.trim() || !time) return;
+    setLoading(true);
+    let lat = null;
+    let lng = null;
+    let resolvedAddress = address.trim() || null;
+    if (address.trim()) {
+      const geo = await geocodeAddress(address);
+      if (geo) {
+        lat = geo.lat;
+        lng = geo.lng;
+        resolvedAddress = geo.formattedAddress || address.trim();
+      }
+    }
+    setLoading(false);
+    onAddMission(dayIdx, { id: crypto.randomUUID(), label: label.trim(), address: resolvedAddress, lat, lng, time, durationMin: Number(duration) || 30 });
+    setLabel('');
+    setAddress('');
+    setTime('');
+    setDuration(30);
+    setOpen(false);
+  }
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} className="flex items-center gap-1.5 text-[11px] text-ink-faint hover:text-accent font-medium">
+        <Plus size={12} /> Ajouter une mission
+      </button>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-dashed border-border/20 px-3 py-2.5 flex flex-col gap-1.5">
+      <Input placeholder="Intitulé (ex. Aéroport — récupérer un colis)" value={label} onChange={(e) => setLabel(e.target.value)} className="text-xs" />
+      <Input placeholder="Adresse (optionnel)" value={address} onChange={(e) => setAddress(e.target.value)} className="text-xs" />
+      <div className="flex gap-1.5">
+        <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="input-field text-xs flex-1" />
+        <input
+          type="number"
+          min={5}
+          step={5}
+          value={duration}
+          onChange={(e) => setDuration(e.target.value)}
+          title="Durée (min)"
+          className="input-field text-xs w-16"
+        />
+      </div>
+      <div className="flex gap-1.5 justify-end">
+        <button onClick={() => setOpen(false)} className="text-[11px] text-ink-faint px-2 py-1">
+          Annuler
+        </button>
+        <Button size="sm" variant="secondary" disabled={!label.trim() || !time || loading} onClick={handleAdd}>
+          <Check size={13} />
+        </Button>
+      </div>
     </div>
   );
 }

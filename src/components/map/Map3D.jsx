@@ -129,7 +129,8 @@ export default function Map3D({ home, days = [], activeDayFilter = 'all' }) {
 
     days.forEach((day, i) => {
       const visible = activeDayFilter === 'all' || activeDayFilter === String(i);
-      if (!visible || !day.stops?.length) return;
+      const missionEvents = (day.schedule?.events || []).filter((e) => e.type === 'mission' && e.mission.lat != null);
+      if (!visible || (!day.stops?.length && !missionEvents.length)) return;
       const color = dayColor(i);
       const origin = day.origin || home;
       const destination = day.destination || home;
@@ -168,6 +169,19 @@ export default function Map3D({ home, days = [], activeDayFilter = 'all' }) {
           altitude: 30,
         });
         focusPoints.push(stop);
+      });
+
+      missionEvents.forEach((ev) => {
+        const point = { lat: ev.mission.lat, lng: ev.mission.lng };
+        addPin(mode, map, classesRef.current, overlaysRef.current, point, {
+          background: '#78716C',
+          borderColor: '#FFFFFF',
+          glyphText: 'M',
+          glyphColor: '#FFFFFF',
+          extruded: true,
+          altitude: 28,
+        });
+        focusPoints.push(point);
       });
     });
 

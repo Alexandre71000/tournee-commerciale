@@ -160,10 +160,14 @@ function decodeLegPath(leg, encoding) {
   return points;
 }
 
-// Calcule l'itinéraire optimisé d'une journée entre `origin` et `destination` (peuvent différer
-// si la tournée part/arrive d'un hôtel), en tenant compte du trafic prévisionnel à `departureDate`.
+// Calcule l'itinéraire optimisé entre `origin` et `destination` (peuvent différer si la tournée
+// part/arrive d'un hôtel ou d'un point fixe intermédiaire), en tenant compte du trafic prévisionnel
+// à `departureDate`. `dayClients` peut être vide (simple trajet direct, ex. entre deux points fixes
+// sans arrêt libre entre les deux).
 export async function computeOptimizedRoute(origin, destination, dayClients, departureDate) {
-  if (!dayClients.length) return null;
+  if (!dayClients.length && haversineKm(origin, destination) < 0.05) {
+    return { orderedStops: [], legs: [], totalDistanceM: 0, totalDurationS: 0 };
+  }
   const service = await getDirectionsService();
   const { TravelMode } = await importLibrary('routes');
   const { encoding } = await getGeometryLibrary();
@@ -223,18 +227,23 @@ function roundNearestSlot(min, slot) {
   return Math.round(min / slot) * slot;
 }
 
-// Construit le planning horaire d'une journée à partir de l'itinéraire optimisé :
-// chaque visite démarre sur un créneau rond (30 min), le départ recommandé (créneau
-// précédent) laisse une marge de sécurité, et une pause déjeuner de `lunchBreakMin`
-// est insérée à un horaire aléatoire entre 12h et 13h si la journée s'étend jusque-là.
+// Construit le planning horaire d'un tronçon (toute la journée, ou un segment entre deux points
+// fixes — voir buildSegmentedDaySchedule) à partir de son itinéraire optimisé : chaque visite
+// démarre sur un créneau rond (30 min), le départ recommandé (créneau précédent) laisse une marge
+// de sécurité, et une pause déjeuner de `lunchBreakMin` est insérée à un horaire aléatoire entre
+// 12h et 13h si le tronçon s'étend jusque-là. `start` est soit une heure 'HH:MM', soit un nombre de
+// minutes depuis minuit (pour enchaîner à la suite d'un tronçon précédent). `lunchState`, si fourni,
+// est un objet {taken, target} lu puis mis à jour en place pour ne prendre qu'une seule pause sur
+// plusieurs tronçons chaînés. `allowEarlyFirstStop` (par défaut true) autorise le tout premier arrêt
+// du tronçon à viser le créneau le plus proche avant l'heure de départ ; à désactiver pour un tronçon
+// qui reprend juste après un point fixe (l'heure de reprise n'est plus négociable).
 // Retourne une liste d'événements chronologiques (visites + pause déjeuner éventuelle).
-export function buildSchedule(orderedStops, legs, dayStartHHMM, visitDurationMin, lunchBreakMin = 60, durationOverrides = null) {
-  const [h, m] = dayStartHHMM.split(':').map(Number);
-  const dayStartMin = h * 60 + m;
+export function buildSchedule(orderedStops, legs, start, visitDurationMin, lunchBreakMin = 60, durationOverrides = null, lunchState = null, allowEarlyFirstStop = true) {
+  const dayStartMin = typeof start === 'string' ? (([h, m]) => h * 60 + m)(start.split(':').map(Number)) : start;
   let clock = dayStartMin;
 
-  const lunchTarget = LUNCH_WINDOW_START_MIN + Math.random() * (LUNCH_WINDOW_END_MIN - LUNCH_WINDOW_START_MIN);
-  let lunchTaken = !(lunchBreakMin > 0);
+  let lunchTaken = lunchState?.taken ?? !(lunchBreakMin > 0);
+  let lunchTarget = lunchState?.target ?? LUNCH_WINDOW_START_MIN + Math.random() * (LUNCH_WINDOW_END_MIN - LUNCH_WINDOW_START_MIN);
 
   const events = [];
   const stops = [];
@@ -247,7 +256,7 @@ export function buildSchedule(orderedStops, legs, dayStartHHMM, visitDurationMin
     // de partir un peu plus tôt, plutôt que d'attendre systématiquement le créneau suivant.
     // Les arrêts suivants sont contraints par l'heure réelle de fin de la visite précédente : on ne
     // peut qu'arrondir au créneau suivant (impossible d'arriver avant d'être physiquement parti).
-    let visitStart = i === 0 ? roundNearestSlot(rawArrival, SLOT_MINUTES) : roundUpToSlot(rawArrival, SLOT_MINUTES);
+    let visitStart = i === 0 && allowEarlyFirstStop ? roundNearestSlot(rawArrival, SLOT_MINUTES) : roundUpToSlot(rawArrival, SLOT_MINUTES);
 
     // Si cette visite démarrerait à midi ou après, la pause déjeuner passe avant (à l'horaire
     // aléatoire visé, ou immédiatement si on est déjà dans la plage) : on ne peut plus la caser
@@ -295,7 +304,30 @@ export function buildSchedule(orderedStops, legs, dayStartHHMM, visitDurationMin
 
   const firstDepartureEarlierMin = stops.length ? Math.max(0, dayStartMin - stops[0].recommendedDepartureMin) : 0;
 
+  if (lunchState) {
+    lunchState.taken = lunchTaken;
+    lunchState.target = lunchTarget;
+  }
+
   return { events, stops, returnTravelMin, returnPath, endOfDayMin, dayStartMin, firstDepartureEarlierMin };
+}
+
+// buildSchedule ne peut déclencher la pause déjeuner qu'avant une visite qu'il planifie lui-même :
+// si un tronçon se termine par un trajet vers un point fixe (RDV imposé, mission) ou vers le domicile
+// sans plus aucun arrêt libre pour servir de déclencheur, la pause peut être manquée alors que la
+// journée traverse bien la plage 12h-13h. Cette fonction couvre ce cas après coup : si la pause n'a
+// pas encore eu lieu et que l'heure d'arrivée `arrivalClock` (calculée avant cet ajustement) tombe
+// dans la plage, on la case juste avant le dernier trajet (au même endroit que le dernier arrêt,
+// puis on reprend le même trajet) et on renvoie la nouvelle heure d'arrivée. Mute `lunchState`.
+export function maybeInsertTrailingLunch(preTravelClock, arrivalClock, lunchState, lunchBreakMin) {
+  if (!lunchState || lunchState.taken || !(lunchBreakMin > 0) || arrivalClock < LUNCH_WINDOW_START_MIN) {
+    return { event: null, clock: arrivalClock };
+  }
+  const travelMin = arrivalClock - preTravelClock;
+  const lunchStart = roundUpToSlot(Math.max(preTravelClock, Math.min(lunchState.target, arrivalClock)), 15);
+  const lunchEnd = lunchStart + lunchBreakMin;
+  lunchState.taken = true;
+  return { event: { type: 'lunch', startMin: lunchStart, endMin: lunchEnd }, clock: lunchEnd + travelMin };
 }
 
 export function minutesToHHMM(totalMin) {
